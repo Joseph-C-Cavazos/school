@@ -1,0 +1,133 @@
+#!/usr/bin/python
+
+# Imports
+from __future__ import print_function
+
+import sys
+import os
+import pickle
+import traceback
+
+# Constants
+TIMER_DEFAULT = 60
+
+# Utility/Helper Functions
+def printErr(str):
+   print(str, file=sys.stderr)
+
+# Functions
+def printUsage():
+   printErr(
+   '''Usage: %s [-o outfile] [-d [timer]] [-x excludeFile] [-r rootDir] [-h | --help]
+   DESCRIPTION
+      A program that will run
+
+   OPTIONS
+      -o outfile: Will use the file outfile to store the results of the scan. If the file is already properly populated before running, it will be used for comparison of file hashes. If a file is specified and being compared against, the new data will overwrite the old and any changes printed to STDOUT. If no file is specified, the raw data will be printed to STDOUT. This file will automatically be excluded from being scanned.
+
+      -d [timer]: Will start the program as a daemon that will periodically rerun every [timer] number of seconds after the completion of the previous scan. If no timer is specified, it will default to a built-in 1 hour.
+
+      -x excludeFile: This specifies a file, excludeFile, that will be read in as a list of files and directories to be excluded from the scan.
+
+      -r rootDir: This specifies the root directory from which the scan will begin. If no directory is specified the current/present working directory will be used.
+
+      -h | --help: Will show this usage message.''' %  __file__)
+
+# Primary function used to parse arguments.
+def parseArgs(args):
+   argHash = {'progname':args.pop(0)}
+   
+   # Loop to take off first argument through progression
+   while len(args) > 0:
+      arg = args.pop(0)
+
+      # Help / Usage option
+      if arg == '-h' or arg == '--help':
+         printUsage()
+         sys.exit(1)
+
+      # Root Directory option
+      elif arg == '-r':
+         if len(args) == 0:
+            printErr("ERROR: -r expects root directory path to follow option")
+            sys.exit(1)
+         argHash['rootDir'] = args.pop(0)
+
+      # Exclude File option
+      elif arg == '-x':
+         if len(args) == 0:
+            printErr("ERROR: -x expects a file containing excluded paths to follow option")
+            sys.exit(1)
+         argHash['exFilename'] = args.pop(0)
+
+      # "Daemon" Mode option
+      elif arg == '-d':
+         argHash['daemon'] = True
+         if len(args) > 0:
+            if not args[0].startswith('-'):
+               argHash['timer'] = args.pop(0)
+
+      # Output File option
+      elif arg == '-o':
+         if len(args) == 0:
+            printErr("ERROR: -o expects a filename for the output file to follow option")
+            sys.exit(1)
+         argHash['outFilename'] = args.pop(0)
+
+      else:
+         printErr("ERROR: Unrecognized option. Please run with the -h option to display help and usage")
+         sys.exit(1)
+
+   return argHash
+
+# Used to do more rigorous checking of the options and arguments passed
+# to the script.
+def checkOpts(args):
+
+   if not 'rootDir' in args:
+      args['rootDir'] = os.getcwd()
+
+   if 'exFilename' in args:
+      try:
+         args['exFile'] = open(args['exFilename'], 'r')
+      except IOError as ex:
+         printErr("ERROR: Unable to open file: %s\n%s" % (args['exFilename'], ex.strerror))
+         sys.exit(1)
+
+   if 'outFilename' in args:
+      try:
+         args['outFile'] = open(args['outFilename'], 'a+')
+      except IOError as ex:
+         printErr("ERROR: Unable to open file: %s\n%s" % (args['outFilename'], ex.strerror))
+         sys.exit(1)
+
+   if 'timer' in args:
+      if not args['timer'].isdigit():
+         printErr("ERROR: Timer is expected to be the number of seconds between scans")
+         sys.exit(1)
+   else:
+      args['timer'] = TIMER_DEFAULT
+
+   return args
+
+# "Main"
+args = parseArgs(sys.argv)
+args = checkOpts(args)
+
+# Opening with "a+" mode worked to permit creating the file if it didn't exist
+# as well as permitting the file to be read before being overwritten. The
+# caveat is that it seeks to the end of the file, requiring a seek to the start
+# of the file.
+args['outFile'].seek(0)
+
+if 'outFilename' in args:
+   try:
+      hashes = pickle.load(args['outFile'])
+   except EOFError as ex:
+      printErr("WARNING: Output file is empty. Will be treated as empty and overwritten: %s" % (args['outFile'].name))
+   except Exception as ex:
+      printErr("ERROR: Output file not formatted correctly: %s\nERROR: To prevent harming file, program will terminate.\n%s" % (args['outFile'].name, ex))
+      traceback.print_tb(sys.exc_info()[2])
+      sys.exit(1)
+
+print(args)
