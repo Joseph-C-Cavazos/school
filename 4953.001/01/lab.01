@@ -7,6 +7,7 @@ import sys
 import os
 import pickle
 import traceback
+import hashlib
 
 # Constants
 TIMER_DEFAULT = 60
@@ -96,7 +97,7 @@ def checkOpts(args):
 
    if 'outFilename' in args:
       try:
-         args['outFile'] = open(args['outFilename'], 'a+')
+         args['outFile'] = open(args['outFilename'], 'ab+')
       except IOError as ex:
          printErr("ERROR: Unable to open file: %s\n%s" % (args['outFilename'], ex.strerror))
          sys.exit(1)
@@ -110,19 +111,25 @@ def checkOpts(args):
 
    return args
 
+# Turned out being much much easier than expected. May remove function.
+def getListFromFile(excl):
+   return excl.read().splitlines()
+
 # "Main"
 args = parseArgs(sys.argv)
 args = checkOpts(args)
 
-# Opening with "a+" mode worked to permit creating the file if it didn't exist
-# as well as permitting the file to be read before being overwritten. The
-# caveat is that it seeks to the end of the file, requiring a seek to the start
-# of the file.
-args['outFile'].seek(0)
+oldHashes = None
 
 if 'outFilename' in args:
+   # Opening with "a+" mode worked to permit creating the file if it didn't exist
+   # as well as permitting the file to be read before being overwritten. The
+   # caveat is that it seeks to the end of the file, requiring a seek to the start
+   # of the file.
+   args['outFile'].seek(0)
+
    try:
-      hashes = pickle.load(args['outFile'])
+      oldHashes = pickle.load(args['outFile'])
    except EOFError as ex:
       printErr("WARNING: Output file is empty. Will be treated as empty and overwritten: %s" % (args['outFile'].name))
    except Exception as ex:
@@ -130,4 +137,40 @@ if 'outFilename' in args:
       traceback.print_tb(sys.exc_info()[2])
       sys.exit(1)
 
+if 'exFile' in args:
+   exList = getListFromFile(args['exFile'])
+   exList = [os.path.abspath(path) for path in exList]
+else:
+   exList = ()
+
+hashes = dict()
+
+# Primary Loop
+for rootDir, dirs, filenames in os.walk(args['rootDir'], topdown=True):
+   dirs[:] = [d for d in dirs if os.path.join(rootDir, d) not in exList]
+   for filename in filenames:
+      absPath = os.path.join(rootDir, filename)
+      if absPath in exList:
+         continue
+      try:
+         md5 = hashlib.md5(open(absPath, 'rb').read()).hexdigest()
+         hashes[absPath] = md5
+      except IOError as ex:
+         printErr("ERROR: Opening file: %s\n%s\nSkipping file to continue" % (absPath, ex.strerror))
+         continue
+
+if 'outFile' in args:
+   args['outFile'].seek(0)
+   pickle.dump(hashes, args['outFile'])
+   print("Hashes dumped to output file: %s" % (args['outFile'].name))
+
+   added = set(hashes.keys() - oldHashes.keys())
+   deleted = set(oldHashes.keys() - hashes.keys())
+   changed = set(
+
+else:
+   for key in hashes:
+      print("[%s] - %s" % (hashes[key], key))
+
 print(args)
+print(hashes)
