@@ -51,13 +51,6 @@ def printHashes(hashes, keys=None):
    @param keys The list of keys. If not defined, the keys from
       hashes will be used.
    '''
-   #if not keys is None:
-      #for key in keys:
-         #print("[%s] - %s" % (hashes[key], key))
-   #else:
-      #for key in hashes:
-         #print("[%s] - %s" % (hashes[key], key))
-
    if not keys is None:
       tmpKeys = keys
    else:
@@ -132,8 +125,6 @@ def parseArgs(args):
 
    return argHash
 
-# Used to do more rigorous checking of the options and arguments passed
-# to the script.
 def checkOpts(args):
    '''Performs rigorous checking of arguments successfully parsed to determine they are formatted correctly.
    @param args The formatted dictionary of arguments received by the script.
@@ -237,7 +228,7 @@ while True:
             continue
 
    # Formatted output of results. Uses date as a header for block.
-   lineBreak("Check Completed: %s\n" % (time.ctime()), '', '~', 60)
+   lineBreak("Check Completed: %s\n" % (time.ctime()), '', '~', FILL_WIDTH + 10)
 
    # If an output file is open, dump dictionary of hashes to it.
    if 'outFile' in args:
@@ -270,7 +261,7 @@ while True:
 
    # Current hashes will be compared to for next iteration.
    oldHashes = hashes
-   lineBreak('','\n','~',60)
+   lineBreak('','\n','~',FILL_WIDTH + 10)
 
    # Not running in "daemon" mode will break from the loop.
    if not args['daemon']:
