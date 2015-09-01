@@ -21,7 +21,7 @@
 # Imports
 ## Imported print_function from __future__ to permit "proper" stderr printing.
 from __future__ import print_function
-import sys, os, pickle, traceback, hashlib, time
+import sys, os, pickle, traceback, hashlib, time, stat
 
 # Authorship Information
 __author__ = "Joseph Cavazos"
@@ -214,6 +214,17 @@ while True:
          # File will be skipped if found in the exlude list.
          if absPath in exList:
             continue
+
+         # Files that do not exist are skipped.
+         if not os.path.exists(absPath):
+            continue
+
+         # Files that are not "regular" (e.g. special block devices, etc.) are skipped.
+         mode = os.stat(absPath).st_mode
+         if not stat.S_ISREG(mode):
+            printErr("Skipping non-regular file: %s" % (absPath))
+            continue
+
          # Attempt to md5sum a file. Will fail if file cannot be opened for reading (commonly file permissions).
          try:
             md5 = hashlib.md5(open(absPath, 'rb').read()).hexdigest()
