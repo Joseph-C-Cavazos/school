@@ -30,8 +30,9 @@ __email__ = "Joseph.C.Cavazos@gmail.com"
 __version__ = "0.1"
 
 # Constants
-TIMER_DEFAULT = 60
-FILL_WIDTH = 50
+TIMER_DEFAULT = 60   # Default number of seconds for timer.
+FILL_WIDTH = 50      # Number of times to repeat the string on breaks.
+FILE_BUF = 4096      # Number of bytes to read into the buffer at a time.
 
 # Utility/Helper Functions
 def printErr(str):
@@ -63,6 +64,21 @@ def lineBreak(pre='', post='', fill='-', mult=FILL_WIDTH):
    @param mult The number of times to repeat the fill string. Defaults to FILL_WIDTH.
    '''
    print("%s%s%s" % (pre, fill * mult, post))
+
+# NOTE: This function is an exact copy from StackOverflow Question #3431825
+# Unfortunately, due to large files exceeding memory contraints, the need
+# for buffering came into effect and I was unsure how to do it in terms of
+# Python.
+def md5sum(filename):
+   '''Returns an md5 hash of the contents of a file.
+   @param filename The file to be opened and hashed.
+   @return The md5 hash of the contents of the file.
+   '''
+   hash = hashlib.md5()
+   with open(filename) as f:
+      for chunk in iter(lambda: f.read(FILE_BUF), ""):
+         hash.update(chunk)
+   return hash.hexdigest()
 
 # Primary Functions
 def printUsage():
@@ -227,7 +243,8 @@ while True:
 
          # Attempt to md5sum a file. Will fail if file cannot be opened for reading (commonly file permissions).
          try:
-            md5 = hashlib.md5(open(absPath, 'rb').read()).hexdigest()
+            #md5 = hashlib.md5(open(absPath, 'rb').read()).hexdigest()
+            md5 = md5sum(absPath)
             hashes[absPath] = md5
          except IOError as ex:
             printErr("ERROR: Opening file: %s\n%s\nSkipping file to continue" % (absPath, ex.strerror))
