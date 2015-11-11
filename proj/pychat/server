@@ -1,0 +1,344 @@
+#!/usr/bin/python
+
+'''Usage:
+      %s [port]
+      OR [-h | --help]
+
+   DESCRIPTION
+      A chat server that will accept incoming connections and maintain
+      an updated chat service between all the clients including
+      encrypting traffic as necessary.
+
+   OPTIONS
+      port: The port on which the chat server should listen for incoming
+      request. If no port is specified, it will run off of a default port
+      as specified in 'util.py'.
+
+      -h | --help: Will show this usage message.
+'''
+
+# Imports
+from __future__ import print_function
+
+import sys
+import socket
+import util
+import select
+import time
+import datetime
+
+# Authorship Information
+__author__     = "Joseph Cavazos"
+__maintainer__ = __author__
+__email__      = "Joseph.C.Cavazos@gmail.com"
+__version__    = "0.1"
+
+# Constants
+DEFAULT_PORT   = util.DEFAULT_PORT
+MAX_PORT       = util.MAX_PORT
+BUFSZ          = util.BUFSZ
+ASCII_MIN      = util.ASCII_MIN
+ASCII_MAX      = util.ASCII_MAX
+ASCII_RANGE    = util.ASCII_RANGE
+
+printErr    = util.printErr
+printUsage  = util.printUsage
+genMaps     = util.genMaps
+crypt       = util.crypt
+
+# Functions
+def parseArgs(args):
+   '''Parses through an argument list to return a dictionary matching the options to key-value pairs.
+   @param args The argument list to parse through.
+   @return A dictionary containing definitions according to options passed to the program.
+   '''
+   # Strips out the base program name so as not to be read in through loop.
+   argHash = {'progname':args.pop(0)}
+
+   # Loop to pop off first argument.
+   while len(args) > 0:
+      arg = args.pop(0)
+
+      # Help / Usage option
+      if arg == '-h' or arg == '--help':
+         printUsage(argHash['progname'], __doc__)
+         sys.exit(1)
+
+      if 'port' in argHash:
+         printErr("ERROR: Too many arguments.")
+         sys.exit(1)
+
+      argHash['port'] = arg
+
+   return argHash
+
+def checkArgs(args):
+   '''Checks the arguments collected to ensure they are formatted correctly.
+   @param args The formatted dictionary of arguments received by the script.
+   @return A dictionary correctly formatted for use in the remaining program.
+   '''
+   # If host is undefined, we can assume that we are missing arguments.
+   if not 'port' in args:
+      args['port'] = DEFAULT_PORT
+   else:
+      try:
+         args['port'] = int(args['port'])
+      except ValueError:
+         printErr("ERROR: Port must be an integer between 0 and %d" % MAX_PORT)
+         sys.exit(1)
+
+   if args['port'] < 0 or args['port'] > MAX_PORT:
+      printErr("ERROR: Port must be an integer between 0 and %d" % MAX_PORT)
+      sys.exit(1)
+
+   return args
+
+def getTimeStamp():
+   return datetime.datetime.fromtimestamp(time.time()).strftime("%H:%M:%S")
+
+def msgAll(msg, users, sender):
+   for user in users:
+      if user == sender:
+         continue
+      user.sendMsg(msg)
+   sys.stdout.write(msg)
+
+# Classes
+class Client:
+   '''A class representing a Client from the point of view of the server.
+   '''
+
+   def __init__(self, sock):
+      '''The initialization method for the Client class.
+      @param sock The already established socket from the client.
+      '''
+      self.sock = sock
+      self.key = None
+      self.encMap = None
+      self.decMap = None
+      self.uname = None
+
+   def setKey(self, key):
+      '''Sets the encryption key for the Client.
+      @param key The key to set for the client.
+      '''
+      self.key = key
+      (self.encMap, self.decMap) = genMaps(self.key)
+
+   def setUname(self, uname):
+      '''Sets the username for the Client.
+      @param uname The username to set for the client.
+      '''
+      self.uname = uname
+
+   def getUname(self):
+      '''Gets the username for the Client.
+      @return The username of the client.
+      '''
+      retur self.uname
+
+   def send(self, msg):
+      '''The base send method used to communicate across the socket using a shared message syntax to guarantee full reads on the other end. Meant as the send to be paired with recv().
+      @param msg The message to send.
+      '''
+      slen = len(msg)
+      sent = 0
+      try:
+         # The message format is "X:msg" where X is the length of the string
+         # following the ':' character.
+         msg = str(slen) + ':' + msg
+         slen += len(str(slen)) + 1
+         
+         # Guaranteed full send since the socket is not guaranteed to send
+         # the entirety of data with a single send.
+         while sent != slen:
+            sent = self.sock.send(msg[sent:])
+
+      except Exception as e:
+         self.cleanup(e)
+
+   def recv(self):
+      '''The base receive method used to communicate across the socket using a shared message syntax. Meant as the reader to be paired with send().
+      @return The message received from the socket.
+      '''
+      buf = ''
+      try:
+         # Loop to read the message length header prepended to the message.
+         while ':' not in buf:
+            buf += self.sock.recv(1)
+            if buf == '':
+               return None
+
+         slen = int(buf[:-1])
+         msg = ''
+         msg = self.sock.recv(slen)
+
+         if msg == '':
+            msg = None
+
+         return msg
+
+      except Exception as e:
+         self.cleanup(e)
+
+   def cleanup(self, e):
+      '''A clean up method used to terminate the program cleanly after meeting an unexpected state.
+      @param e The exception method passed to be displayed to the user.
+      '''
+      printErr("ERROR: %s" % e)
+      self.sock.close()
+
+   def recvMsg(self):
+      '''A wrapper for recv() that will automate decrypting the incoming message.
+      @return The decrypted message.
+      '''
+      return self.decrypt(self.recv())
+
+   def sendMsg(self, msg):
+      '''A wrapper for send() that will automate encrypting the outgoing message.
+      @param msg The plaintext message to be sent.
+      '''
+      self.send(self.encrypt(msg))
+
+   def encrypt(self, msg):
+      '''A wrapper to encrypt the passed message.
+      @param msg The plaintext message to encrypt.
+      @return The encrypted message.
+      '''
+      return crypt(self.getEncMap(), msg)
+
+   def decrypt(self, msg):
+      '''A wrapper to decrypt the passed message.
+      @param msg The encrypted message to decrypt.
+      @return The decrypted message.
+      '''
+      return crypt(self.getDecMap(), msg)
+
+   def getKey(self):
+      '''Returns the encryption key associated with the client.
+      @return The Client's key.
+      '''
+      return self.key
+
+   def getSock(self):
+      '''Returns the socket associated with the client.
+      @return The Client's socket.
+      '''
+      return self.sock
+
+   def getEncMap(self):
+      '''Returns the encryption map/dictionary associated with the client.
+      @return The Client's encryption map.
+      '''
+      return self.encMap
+
+   def getDecMap(self):
+      '''Returns the decryption map/dictionary associated with the client.
+      @return The Client's decryption map.
+      '''
+      return self.decMap
+
+# Main
+if __name__ == "__main__":
+   args = parseArgs(sys.argv)
+   args = checkArgs(args)
+
+   # Socket initialization and connection.
+   sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+   try:
+      sock.bind(('', args['port']))
+      sock.listen(5)
+   except socket.error as e:
+      printErr("ERROR: %s" % e)
+      sys.exit(1)
+
+   blocks = [sock, sys.stdin]
+   users = []
+
+   print("Chat Server Initialized")
+
+   # Primary read loop.
+   while True:
+      # Select to perform seemingly non-blocking I/O amongst all client sockets,
+      # the server socket, and stdin.
+      (sRead, sWrite, sErr) = select.select(blocks, [], [], 0)
+
+      for read in sRead:
+         # If the file to read is the server socket, then we know that there is
+         # a new connection to accept and establish.
+         if read == sock:
+            (newSock, addr) = sock.accept()
+
+            # Add user to socket and user lists.
+            blocks.append(newSock)
+            users.append(Client(newSock))
+
+            # TCP connection established.
+            print("Client connected: %s:%s" % addr)
+
+         # If the file to read is stdin, check to see if it is a server command.
+         elif read == sys.stdin:
+            
+            # The /quit command will shutdown the server.
+            if '/quit' == sys.stdin.readline().rstrip():
+               for toClose in blocks:
+                  toClose.close()
+               sock.close()
+               sys.exit(0)
+
+         # The remaining possible files are all client sockets. So we can assume
+         # that we have a message waiting to be read into the server.
+         else:
+            client = None
+            for user in users:
+               if user.getSock() == read:
+                  client = user
+                  break
+
+            # The first message from the client should always be their key.
+            if client.getKey() is None:
+               msg = client.recvMsg()
+               client.setKey(int(msg))
+            # The second message should be the username challenge.
+            elif client.getUname() is None:
+               uname = client.recvMsg()
+
+               # Make sure the name is not a duplicate.
+               for user in users:
+                  if uname == user.getUname():
+                     uname = None
+                     break
+
+               # If the name is not a duplicate and is alphanumeric,
+               # the client is officially in the connected state.
+               if uname is not None and uname.isalnum():
+                  client.setUname(uname)
+                  client.sendMsg(uname)
+                  msg = ("[%s] -- %s has connected --\n" % (getTimeStamp(), client.getUname()))
+                  msgAll(msg, users, client)
+
+               # The client expects the same username back as a
+               # confirmation. By prepending 'x', the username is
+               # altered and the client will be prompted for a different
+               # name.
+               else:
+                  client.sendMsg("x%s" % uname)
+            else:
+               # If not the first message, then it is a chat message.
+               msg = client.recvMsg()
+
+               # If recv returns None, the socket is closed and the client
+               # can be considered disconnected.
+               if msg == None:
+                  msg = ("[%s] -- %s has disconnected --\n" % (getTimeStamp(), client.getUname()))
+                  msgAll(msg, users, client)
+                  blocks.remove(client.getSock())
+                  client.getSock().close()
+                  users.remove(client)
+
+               # Broadcast out the message to the chatroom.
+               else:
+                  msg = ("[%s] %s: " % (getTimeStamp(), client.getUname())) + msg
+                  msgAll(msg, users, client)
+   sock.close()
